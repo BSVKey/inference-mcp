@@ -1,0 +1,16 @@
+{
+  "name": "@bsvkey/inference-mcp",
+  "version": "1.0.0",
+  "description": "MCP server: buy Claude & Grok inference metered per token, settled in BSV, through the hosted inference.bsvkey.com gateway.",
+  "type": "module",
+  "bin": { "bsvkey-inference-mcp": "server.js" },
+  "main": "server.js",
+  "engines": { "node": ">=18" },
+  "files": ["server.js", "SKILL.md", "README.md", "LICENSE"],
+  "keywords": ["mcp", "model-context-protocol", "bsv", "inference", "pay-per-token", "http-402", "x402", "claude", "grok", "micropayments", "agents"],
+  "author": "Embryo Space Inc. DBA BSVKey",
+  "license": "MIT",
+  "homepage": "https://inference.bsvkey.com",
+  "repository": { "type": "git", "url": "git+https://github.com/BSVKey/inference-mcp.git" },
+  "bugs": { "url": "https://github.com/BSVKey/inference-mcp/issues" }
+}
