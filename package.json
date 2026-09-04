@@ -2,6 +2,7 @@
   "name": "@bsvkey/inference-mcp",
   "version": "1.0.1",
   "description": "MCP server: buy Claude & Grok inference metered per token, settled in BSV, through the hosted inference.bsvkey.com gateway.",
+  "mcpName": "io.github.BSVKey/inference-mcp",
   "type": "module",
   "bin": { "bsvkey-inference-mcp": "server.js" },
   "main": "server.js",
