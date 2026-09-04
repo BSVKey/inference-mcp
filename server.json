@@ -1,0 +1,32 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "name": "io.github.BSVKey/inference-mcp",
+  "description": "Pay-per-token Claude and Grok inference, settled in BSV micropayments, via the hosted inference.bsvkey.com gateway.",
+  "repository": {
+    "url": "https://github.com/BSVKey/inference-mcp",
+    "source": "github"
+  },
+  "version": "1.0.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@bsvkey/inference-mcp",
+      "version": "1.0.1",
+      "transport": { "type": "stdio" },
+      "environmentVariables": [
+        {
+          "name": "BSVKEY_API_KEY",
+          "description": "A funded channel key in the form channelId:channelSecret. Open + fund a channel once at https://inference.bsvkey.com. Optional (can be passed per call).",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "BSVKEY_BASE_URL",
+          "description": "Gateway base URL. Defaults to https://inference.bsvkey.com/v1; override to point at a self-hosted deployment.",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}
