@@ -12,7 +12,10 @@ subscription, no account, no card. Models: Claude (haiku/sonnet/opus) and Grok
 (grok-4.3 fast, grok-4.6), with optional live web search.
 
 Install it as an MCP server (see README.md) — this skill assumes those four tools
-are available: `list_models`, `open_channel`, `infer`, `channel_balance`.
+are available: `list_models`, `open_channel`, `infer`, `channel_balance`, `x402_infer`.
+
+`x402_infer` is an alternative to `infer`: instead of a prepaid channel, it pays for a
+single call in BSV via x402, using a funded key (`wif` arg or `BSVKEY_WIF`). No channel setup.
 
 ## When to use
 - The user/agent wants to buy inference on demand and pay only for what it uses.

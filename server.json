@@ -6,13 +6,13 @@
     "url": "https://github.com/BSVKey/inference-mcp",
     "source": "github"
   },
-  "version": "1.0.1",
+  "version": "1.1.0",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@bsvkey/inference-mcp",
-      "version": "1.0.1",
+      "version": "1.1.0",
       "transport": { "type": "stdio" },
       "environmentVariables": [
         {
@@ -25,6 +25,12 @@
           "name": "BSVKEY_BASE_URL",
           "description": "Gateway base URL. Defaults to https://inference.bsvkey.com/v1; override to point at a self-hosted deployment.",
           "isRequired": false
+        },
+        {
+          "name": "BSVKEY_WIF",
+          "description": "A funded BSV private key (WIF) used by the x402_infer tool to pay per call in BSV (no channel). Signing is local; the key never leaves the process. Optional (can be passed per call).",
+          "isRequired": false,
+          "isSecret": true
         }
       ]
     }

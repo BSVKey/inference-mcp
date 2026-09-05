@@ -5,7 +5,12 @@ settled in BSV**, through the hosted gateway at **inference.bsvkey.com**. Zero
 dependencies (Node ≥ 18, uses global `fetch`). It's a thin HTTP client — it never
 holds your keys or runs models; every call is billed through the gateway.
 
-Tools: `list_models`, `infer`, `channel_balance`, `open_channel`.
+Tools: `list_models`, `infer`, `channel_balance`, `open_channel`, `x402_infer`.
+
+Two ways to pay: a **prepaid channel** (`infer`, fund once, draw down per token) or
+**per call via x402** (`x402_infer` — no channel; the agent pays each request in BSV
+with its own key). `x402_infer` needs a funded WIF (`wif` arg or `BSVKEY_WIF`) and the
+optional `@bsvkey/x402-bsv-client` + `@bsv/sdk` packages (installed with this one).
 
 ## Quick start
 1. **Fund a channel once** at https://inference.bsvkey.com (BRC-100 wallet, or

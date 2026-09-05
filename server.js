@@ -85,6 +85,24 @@ export const TOOLS = [
       'Explains how to open + fund a prepaid channel. Funding is a real BSV payment signed by a wallet, so it is done once at the website; you then paste the returned channel key here (or set BSVKEY_API_KEY).',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
+  {
+    name: 'x402_infer',
+    description:
+      'Run one inference paid PER CALL in BSV via x402 — no prepaid channel needed. You provide a funded BSV private key (wif or BSVKEY_WIF); the tool fetches the 402 quote, builds + signs a BSV payment, retries with X-PAYMENT, and returns the completion plus the on-chain settlement txid. Non-custodial: signing happens locally in this process, the key never leaves it. Needs @bsvkey/x402-bsv-client + @bsv/sdk (installed with this package).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: 'The user prompt.' },
+        model: { type: 'string', description: 'Model id or policy: auto|cheapest|best, claude-*, grok-*.', default: 'grok-4.3' },
+        system: { type: 'string', description: 'Optional system prompt.' },
+        maxTokens: { type: 'integer', description: 'Max output tokens.', default: 512 },
+        webSearch: { type: 'boolean', description: 'Let the model search the live web (adds a per-search fee to the quote).', default: false },
+        wif: { type: 'string', description: 'A funded BSV private key (WIF) to pay from. Omit to use BSVKEY_WIF. Never leaves this process.' },
+      },
+      required: ['prompt'],
+      additionalProperties: false,
+    },
+  },
 ];
 
 async function callTool(name, args = {}) {
@@ -152,6 +170,45 @@ async function callTool(name, args = {}) {
           'Copy the channel key it returns (format: channelId:channelSecret).',
           'Set BSVKEY_API_KEY to that value (or pass apiKey to infer), then call infer freely until the balance runs out.',
         ],
+      };
+    }
+    case 'x402_infer': {
+      const wif = args.wif || process.env.BSVKEY_WIF || '';
+      if (!wif) throw new Error(`No BSV key. Pass wif "<WIF>" or set BSVKEY_WIF — an agent-funded key to pay per call. Fund its address at ${SITE}.`);
+      let x402;
+      try {
+        x402 = await import('@bsvkey/x402-bsv-client');
+      } catch {
+        throw new Error('Pay-per-call needs @bsvkey/x402-bsv-client and @bsv/sdk. Install them: npm i @bsvkey/x402-bsv-client @bsv/sdk');
+      }
+      const url = `${BASE}/x402/chat/completions`;
+      const init = {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: args.model || 'grok-4.3',
+          messages: [
+            ...(args.system ? [{ role: 'system', content: args.system }] : []),
+            { role: 'user', content: String(args.prompt || '') },
+          ],
+          max_tokens: args.maxTokens || 512,
+          web_search: args.webSearch === true,
+        }),
+      };
+      const res = await x402.fetchWithX402(url, init, { wif });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = data?.error?.message || data?.error || data?.reason || `x402 inference failed (${res.status})`;
+        throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+      }
+      const settle = x402.readSettlement(res) || {};
+      return {
+        model: data.model || args.model,
+        completion: data.choices?.[0]?.message?.content ?? '',
+        paidSats: data.x_bsv?.paidSats,
+        payTo: data.x_bsv?.payTo,
+        settlementTxid: settle.transaction,
+        network: settle.network,
       };
     }
     default:
