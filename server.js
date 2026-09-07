@@ -45,6 +45,44 @@ async function http(method, path, { headers = {}, body } = {}) {
   return { ok: res.ok, status: res.status, json };
 }
 
+// Best-effort, offline verification of the broker's signed usage receipt. Local
+// only (a secp256k1 recovery + sha256): no payment, no network beyond a one-time
+// key fetch, no effect on the x402 path. Gated on the optional
+// @bsvkey/x402-bsv-client verifier so the server keeps zero REQUIRED deps: if it
+// isn't installed we return verified:null (skipped), never an error.
+let _verifier; // module | false | undefined
+let _brokerKey; // hex | null | undefined
+const _seen = new Map(); // channelId -> { seq, cumSats, cumTokens }  (this session)
+async function loadVerifier() {
+  if (_verifier !== undefined) return _verifier;
+  try { _verifier = await import('@bsvkey/x402-bsv-client/usage-receipt'); } catch { _verifier = false; }
+  return _verifier;
+}
+async function brokerReceiptKey() {
+  if (_brokerKey !== undefined) return _brokerKey;
+  try { const r = await http('GET', '/receipt-key'); _brokerKey = r.ok ? (r.json.receiptPubKey || null) : null; } catch { _brokerKey = null; }
+  return _brokerKey;
+}
+async function verifyUsageReceipt(receipt) {
+  if (!receipt) return { verified: null, reason: 'no receipt returned' };
+  const V = await loadVerifier();
+  if (!V) return { verified: null, reason: 'verifier not installed (npm i @bsvkey/x402-bsv-client)' };
+  const one = await V.verifyReceipt(receipt);
+  if (!one.ok) return { verified: false, reason: one.reason };
+  const pinned = await brokerReceiptKey();
+  if (pinned && one.signer !== pinned) return { verified: false, reason: 'signer_not_pinned_broker_key' };
+  if (receipt.cumSats > receipt.fundedSats) return { verified: false, reason: 'cumSats_exceeds_funded' };
+  const prev = _seen.get(receipt.channelId);
+  if (prev) {
+    // Continuity across calls this session actually observed.
+    if (receipt.seq !== prev.seq + 1) return { verified: false, reason: receipt.seq === prev.seq ? 'replayed_seq' : (receipt.seq < prev.seq ? 'seq_regressed' : 'seq_gap') };
+    if (receipt.cumSats !== prev.cumSats + receipt.sats) return { verified: false, reason: 'cumSats_does_not_reconcile' };
+    if (receipt.cumTokens !== prev.cumTokens + receipt.inputTokens + receipt.outputTokens) return { verified: false, reason: 'cumTokens_does_not_reconcile' };
+  }
+  _seen.set(receipt.channelId, { seq: receipt.seq, cumSats: receipt.cumSats, cumTokens: receipt.cumTokens });
+  return { verified: true, ...(prev ? {} : { note: 'baseline: signature + funded-conservation checked; seq continuity verified from here' }) };
+}
+
 export const TOOLS = [
   {
     name: 'list_models',
@@ -141,6 +179,7 @@ async function callTool(name, args = {}) {
         throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
       }
       const x = r.json.x_bsv || {};
+      const rc = await verifyUsageReceipt(x.usageReceipt);
       return {
         model: r.json.model || args.model,
         completion: r.json.choices?.[0]?.message?.content ?? '',
@@ -148,6 +187,12 @@ async function callTool(name, args = {}) {
         routedTo: x.routedTo,
         balanceSatsAfter: x.balanceSatsAfter,
         truncated: x.truncated || false,
+        // Offline-verified signed usage receipt (see usage-receipt spec). null =
+        // not checked (verifier not installed); false w/ receiptCheck = a real
+        // mismatch, treat the meter as untrusted for this call.
+        receiptVerified: rc.verified,
+        ...(rc.reason ? { receiptCheck: rc.reason } : {}),
+        usageReceipt: x.usageReceipt,
       };
     }
     case 'channel_balance': {

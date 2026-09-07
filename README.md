@@ -12,6 +12,15 @@ Two ways to pay: a **prepaid channel** (`infer`, fund once, draw down per token)
 with its own key). `x402_infer` needs a funded WIF (`wif` arg or `BSVKEY_WIF`) and the
 optional `@bsvkey/x402-bsv-client` + `@bsv/sdk` packages (installed with this one).
 
+**Verifiable metering.** Each `infer` call returns a signed usage receipt, and the
+tool auto-verifies it offline (with the optional packages installed): the result
+includes `receiptVerified` (`true`, `false` + `receiptCheck`, or `null` if the
+verifier isn't installed). It recovers the broker key (pinned from
+`GET /v1/receipt-key`), and checks channel binding, a monotonic sequence (no
+replay/gap), and running totals within the funded amount. So the channel payment
+is on-chain and the meter is auditable, without trusting the broker's word. Spec:
+https://inference.bsvkey.com/usage-receipts.md
+
 ## Quick start
 1. **Fund a channel once** at https://inference.bsvkey.com (BRC-100 wallet, or
    load a key in-page). Copy the key it returns: `channelId:channelSecret`.
