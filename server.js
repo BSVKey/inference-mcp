@@ -78,7 +78,7 @@ async function verifyUsageReceipt(receipt, bytes = {}) {
   }
   // The meter: recompute token counts + byte digests from the exact bytes we hold.
   let meterVerified = null;
-  if (typeof V.verifyMeter === 'function' && (bytes.prompt !== undefined || bytes.completion !== undefined)) {
+  if (typeof V.verifyMeter === 'function' && (bytes.messages !== undefined || bytes.prompt !== undefined || bytes.completion !== undefined)) {
     const mv = V.verifyMeter(receipt, bytes);
     if (!mv.ok) return { verified: false, reason: `meter:${mv.reason}`, meterVerified: false };
     meterVerified = true;
@@ -174,14 +174,15 @@ async function callTool(name, args = {}) {
     case 'infer': {
       const k = keyParts(args.apiKey);
       if (!k) throw new Error('No channel key. Pass apiKey "channelId:channelSecret" or set BSVKEY_API_KEY. Open one via the open_channel tool.');
+      const messages = [
+        ...(args.system ? [{ role: 'system', content: args.system }] : []),
+        { role: 'user', content: String(args.prompt || '') },
+      ];
       const r = await http('POST', '/chat/completions', {
         headers: { authorization: `Bearer ${k.raw}` },
         body: {
           model: args.model || 'auto',
-          messages: [
-            ...(args.system ? [{ role: 'system', content: args.system }] : []),
-            { role: 'user', content: String(args.prompt || '') },
-          ],
+          messages,
           max_tokens: args.maxTokens || 512,
           web_search: args.webSearch === true,
         },
@@ -192,7 +193,9 @@ async function callTool(name, args = {}) {
       }
       const x = r.json.x_bsv || {};
       const completion = r.json.choices?.[0]?.message?.content ?? '';
-      const rc = await verifyUsageReceipt(x.usageReceipt, { system: args.system, prompt: String(args.prompt || ''), completion });
+      // Meter over the SAME messages we sent: the OpenAI shim meters the flattened
+      // messages, so the verifier must reproduce that transform (needs @bsvkey/x402-bsv-client >= 0.4.2).
+      const rc = await verifyUsageReceipt(x.usageReceipt, { messages, completion });
       return {
         model: r.json.model || args.model,
         completion,
