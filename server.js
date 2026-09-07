@@ -63,7 +63,7 @@ async function brokerReceiptKey() {
   try { const r = await http('GET', '/receipt-key'); _brokerKey = r.ok ? (r.json.receiptPubKey || null) : null; } catch { _brokerKey = null; }
   return _brokerKey;
 }
-async function verifyUsageReceipt(receipt) {
+async function verifyUsageReceipt(receipt, bytes = {}) {
   if (!receipt) return { verified: null, reason: 'no receipt returned' };
   const V = await loadVerifier();
   if (!V) return { verified: null, reason: 'verifier not installed (npm i @bsvkey/x402-bsv-client)' };
@@ -71,6 +71,18 @@ async function verifyUsageReceipt(receipt) {
   if (!one.ok) return { verified: false, reason: one.reason };
   const pinned = await brokerReceiptKey();
   if (pinned && one.signer !== pinned) return { verified: false, reason: 'signer_not_pinned_broker_key' };
+  // The charge recomputes from the receipt's own rates (overcharge is a dispute).
+  if (typeof V.verifyCharge === 'function') {
+    const c = V.verifyCharge(receipt);
+    if (!c.ok) return { verified: false, reason: `charge:${c.reason}` };
+  }
+  // The meter: recompute token counts + byte digests from the exact bytes we hold.
+  let meterVerified = null;
+  if (typeof V.verifyMeter === 'function' && (bytes.prompt !== undefined || bytes.completion !== undefined)) {
+    const mv = V.verifyMeter(receipt, bytes);
+    if (!mv.ok) return { verified: false, reason: `meter:${mv.reason}`, meterVerified: false };
+    meterVerified = true;
+  }
   if (receipt.cumSats > receipt.fundedSats) return { verified: false, reason: 'cumSats_exceeds_funded' };
   const prev = _seen.get(receipt.channelId);
   if (prev) {
@@ -80,7 +92,7 @@ async function verifyUsageReceipt(receipt) {
     if (receipt.cumTokens !== prev.cumTokens + receipt.inputTokens + receipt.outputTokens) return { verified: false, reason: 'cumTokens_does_not_reconcile' };
   }
   _seen.set(receipt.channelId, { seq: receipt.seq, cumSats: receipt.cumSats, cumTokens: receipt.cumTokens });
-  return { verified: true, ...(prev ? {} : { note: 'baseline: signature + funded-conservation checked; seq continuity verified from here' }) };
+  return { verified: true, meterVerified, ...(prev ? {} : { note: 'baseline: signature + funded-conservation checked; seq continuity verified from here' }) };
 }
 
 export const TOOLS = [
@@ -179,18 +191,21 @@ async function callTool(name, args = {}) {
         throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
       }
       const x = r.json.x_bsv || {};
-      const rc = await verifyUsageReceipt(x.usageReceipt);
+      const completion = r.json.choices?.[0]?.message?.content ?? '';
+      const rc = await verifyUsageReceipt(x.usageReceipt, { system: args.system, prompt: String(args.prompt || ''), completion });
       return {
         model: r.json.model || args.model,
-        completion: r.json.choices?.[0]?.message?.content ?? '',
+        completion,
         charge: x.charge,
         routedTo: x.routedTo,
         balanceSatsAfter: x.balanceSatsAfter,
         truncated: x.truncated || false,
         // Offline-verified signed usage receipt (see usage-receipt spec). null =
         // not checked (verifier not installed); false w/ receiptCheck = a real
-        // mismatch, treat the meter as untrusted for this call.
+        // mismatch, treat the meter as untrusted for this call. meterVerified is
+        // true when the token count was recomputed from the exact bytes.
         receiptVerified: rc.verified,
+        meterVerified: rc.meterVerified,
         ...(rc.reason ? { receiptCheck: rc.reason } : {}),
         usageReceipt: x.usageReceipt,
       };

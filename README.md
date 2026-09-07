@@ -14,11 +14,14 @@ optional `@bsvkey/x402-bsv-client` + `@bsv/sdk` packages (installed with this on
 
 **Verifiable metering.** Each `infer` call returns a signed usage receipt, and the
 tool auto-verifies it offline (with the optional packages installed): the result
-includes `receiptVerified` (`true`, `false` + `receiptCheck`, or `null` if the
-verifier isn't installed). It recovers the broker key (pinned from
-`GET /v1/receipt-key`), and checks channel binding, a monotonic sequence (no
-replay/gap), and running totals within the funded amount. So the channel payment
-is on-chain and the meter is auditable, without trusting the broker's word. Spec:
+includes `receiptVerified` and `meterVerified` (`true`, `false` + `receiptCheck`,
+or `null` if the verifier isn't installed). It recovers the broker key (pinned
+from `GET /v1/receipt-key`); checks channel binding, a monotonic sequence (no
+replay/gap), and running totals within the funded amount; **recomputes the charge**
+from the published rate (you can never be overcharged); and **recomputes the token
+count from the exact bytes** of your system/prompt and the completion, under the
+pinned `bsvkey-meter/1` tokenizer. So the channel payment is on-chain and both the
+meter and the charge are auditable, without trusting the broker's word. Spec:
 https://inference.bsvkey.com/usage-receipts.md
 
 ## Quick start
