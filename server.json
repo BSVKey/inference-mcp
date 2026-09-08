@@ -6,13 +6,13 @@
     "url": "https://github.com/BSVKey/inference-mcp",
     "source": "github"
   },
-  "version": "1.2.1",
+  "version": "1.2.2",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@bsvkey/inference-mcp",
-      "version": "1.2.1",
+      "version": "1.2.2",
       "transport": { "type": "stdio" },
       "environmentVariables": [
         {
@@ -31,6 +31,16 @@
           "description": "A funded BSV private key (WIF) used by the x402_infer tool to pay per call in BSV (no channel). Signing is local; the key never leaves the process. Optional (can be passed per call).",
           "isRequired": false,
           "isSecret": true
+        },
+        {
+          "name": "BSVKEY_FUNDED_SATS",
+          "description": "The amount you funded your channel with on-chain. When set, usage receipts are verified against this instead of the broker-signed fundedSats. Optional (can be passed per call as fundedSats).",
+          "isRequired": false
+        },
+        {
+          "name": "BSVKEY_RECEIPT_STATE",
+          "description": "Path to a JSON file where per-channel receipt continuity (seq + running totals) is persisted, so replays are caught across restarts. Optional; in-memory only if unset.",
+          "isRequired": false
         }
       ]
     }

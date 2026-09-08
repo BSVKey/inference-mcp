@@ -51,26 +51,59 @@ async function http(method, path, { headers = {}, body } = {}) {
 // @bsvkey/x402-bsv-client verifier so the server keeps zero REQUIRED deps: if it
 // isn't installed we return verified:null (skipped), never an error.
 let _verifier; // module | false | undefined
-let _brokerKey; // hex | null | undefined
-const _seen = new Map(); // channelId -> { seq, cumSats, cumTokens }  (this session)
+let _brokerKey; // hex | null  (only a REAL key is ever cached)
+const _seen = new Map(); // channelId -> { seq, cumSats, cumTokens }
+
+// Optional cross-restart continuity. If BSVKEY_RECEIPT_STATE names a file, the
+// observed { seq, cumSats, cumTokens } per channel is loaded on first use and
+// saved after each receipt, so a replay BEFORE the first receipt this process
+// sees is still caught. Best-effort: any fs error falls back to in-memory.
+const STATE_FILE = process.env.BSVKEY_RECEIPT_STATE || '';
+let _stateLoaded = false;
+async function loadSeen() {
+  if (_stateLoaded) return; _stateLoaded = true;
+  if (!STATE_FILE) return;
+  try { const fs = await import('node:fs'); const o = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); for (const [k, v] of Object.entries(o)) _seen.set(k, v); } catch {}
+}
+async function saveSeen() {
+  if (!STATE_FILE) return;
+  try { const fs = await import('node:fs'); const o = {}; for (const [k, v] of _seen) o[k] = v; fs.writeFileSync(STATE_FILE, JSON.stringify(o)); } catch {}
+}
 async function loadVerifier() {
   if (_verifier !== undefined) return _verifier;
   try { _verifier = await import('@bsvkey/x402-bsv-client/usage-receipt'); } catch { _verifier = false; }
   return _verifier;
 }
+// Pin the broker receipt key from GET /v1/receipt-key. Only a real key is cached;
+// a failed fetch returns null WITHOUT caching (so it's retried next call) and the
+// verifier fails CLOSED — reports verified:null while the endpoint is down, never
+// weakening to verified:true just because the pin could not be fetched.
 async function brokerReceiptKey() {
-  if (_brokerKey !== undefined) return _brokerKey;
-  try { const r = await http('GET', '/receipt-key'); _brokerKey = r.ok ? (r.json.receiptPubKey || null) : null; } catch { _brokerKey = null; }
-  return _brokerKey;
+  if (_brokerKey) return _brokerKey;
+  try { const r = await http('GET', '/receipt-key'); if (r.ok && r.json.receiptPubKey) { _brokerKey = r.json.receiptPubKey; return _brokerKey; } } catch {}
+  return null;
 }
-async function verifyUsageReceipt(receipt, bytes = {}) {
+// Offline verification of a signed usage receipt.
+//   opts.expectedChannelId : the channel you called (from your API key). The
+//     receipt must be for THIS channel, and continuity is tracked under this id
+//     (not the receipt's self-reported channelId), so a receipt for another
+//     channel can't be passed off as yours.
+//   opts.fundedSats : the amount YOU funded on-chain. cumSats is checked against
+//     it, and a receipt claiming a different funded amount is rejected. Omit and
+//     the check falls back to the broker-asserted receipt.fundedSats.
+// verified: true (checked) | false (a real mismatch — see reason) | null (could
+// not check: verifier missing, or the pin endpoint is down — fails closed).
+async function verifyUsageReceipt(receipt, bytes = {}, opts = {}) {
   if (!receipt) return { verified: null, reason: 'no receipt returned' };
   const V = await loadVerifier();
   if (!V) return { verified: null, reason: 'verifier not installed (npm i @bsvkey/x402-bsv-client)' };
+  const chan = opts.expectedChannelId || receipt.channelId;
+  if (opts.expectedChannelId && receipt.channelId !== opts.expectedChannelId) return { verified: false, reason: 'wrong_channel' };
   const one = await V.verifyReceipt(receipt);
   if (!one.ok) return { verified: false, reason: one.reason };
   const pinned = await brokerReceiptKey();
-  if (pinned && one.signer !== pinned) return { verified: false, reason: 'signer_not_pinned_broker_key' };
+  if (!pinned) return { verified: null, reason: 'receipt_key_unavailable_failed_closed', meterVerified: null };
+  if (one.signer !== pinned) return { verified: false, reason: 'signer_not_pinned_broker_key' };
   // The charge recomputes from the receipt's own rates (overcharge is a dispute).
   if (typeof V.verifyCharge === 'function') {
     const c = V.verifyCharge(receipt);
@@ -83,16 +116,23 @@ async function verifyUsageReceipt(receipt, bytes = {}) {
     if (!mv.ok) return { verified: false, reason: `meter:${mv.reason}`, meterVerified: false };
     meterVerified = true;
   }
-  if (receipt.cumSats > receipt.fundedSats) return { verified: false, reason: 'cumSats_exceeds_funded' };
-  const prev = _seen.get(receipt.channelId);
+  // Funded conservation. Prefer the amount the caller actually funded on-chain;
+  // the receipt's fundedSats is the broker's assertion (reject if it disagrees).
+  const hasFunded = opts.fundedSats !== undefined && opts.fundedSats !== null;
+  const funded = hasFunded ? Number(opts.fundedSats) : receipt.fundedSats;
+  if (hasFunded && receipt.fundedSats !== funded) return { verified: false, reason: 'funded_mismatch', meterVerified };
+  if (receipt.cumSats > funded) return { verified: false, reason: 'cumSats_exceeds_funded', meterVerified };
+  await loadSeen();
+  const prev = _seen.get(chan);
   if (prev) {
-    // Continuity across calls this session actually observed.
-    if (receipt.seq !== prev.seq + 1) return { verified: false, reason: receipt.seq === prev.seq ? 'replayed_seq' : (receipt.seq < prev.seq ? 'seq_regressed' : 'seq_gap') };
-    if (receipt.cumSats !== prev.cumSats + receipt.sats) return { verified: false, reason: 'cumSats_does_not_reconcile' };
-    if (receipt.cumTokens !== prev.cumTokens + receipt.inputTokens + receipt.outputTokens) return { verified: false, reason: 'cumTokens_does_not_reconcile' };
+    // Continuity across calls observed on THIS channel (persisted if BSVKEY_RECEIPT_STATE set).
+    if (receipt.seq !== prev.seq + 1) return { verified: false, reason: receipt.seq === prev.seq ? 'replayed_seq' : (receipt.seq < prev.seq ? 'seq_regressed' : 'seq_gap'), meterVerified };
+    if (receipt.cumSats !== prev.cumSats + receipt.sats) return { verified: false, reason: 'cumSats_does_not_reconcile', meterVerified };
+    if (receipt.cumTokens !== prev.cumTokens + receipt.inputTokens + receipt.outputTokens) return { verified: false, reason: 'cumTokens_does_not_reconcile', meterVerified };
   }
-  _seen.set(receipt.channelId, { seq: receipt.seq, cumSats: receipt.cumSats, cumTokens: receipt.cumTokens });
-  return { verified: true, meterVerified, ...(prev ? {} : { note: 'baseline: signature + funded-conservation checked; seq continuity verified from here' }) };
+  _seen.set(chan, { seq: receipt.seq, cumSats: receipt.cumSats, cumTokens: receipt.cumTokens });
+  await saveSeen();
+  return { verified: true, meterVerified, ...(prev ? {} : { note: STATE_FILE ? 'continuity checked (persisted across restarts)' : 'baseline: seq continuity verified from here — set BSVKEY_RECEIPT_STATE to persist across restarts' }) };
 }
 
 export const TOOLS = [
@@ -115,6 +155,7 @@ export const TOOLS = [
         maxTokens: { type: 'integer', description: 'Max output tokens.', default: 512 },
         webSearch: { type: 'boolean', description: 'Let the model search the live web (adds a per-search fee).', default: false },
         apiKey: { type: 'string', description: 'channelId:channelSecret for a funded channel. Omit to use BSVKEY_API_KEY.' },
+        fundedSats: { type: 'integer', description: 'The amount you funded this channel with on-chain. If set, usage receipts are verified against it (and a receipt claiming a different funded amount is rejected) instead of trusting the broker-signed fundedSats. Omit to use BSVKEY_FUNDED_SATS.' },
       },
       required: ['prompt'],
       additionalProperties: false,
@@ -193,9 +234,14 @@ async function callTool(name, args = {}) {
       }
       const x = r.json.x_bsv || {};
       const completion = r.json.choices?.[0]?.message?.content ?? '';
-      // Meter over the SAME messages we sent: the OpenAI shim meters the flattened
-      // messages, so the verifier must reproduce that transform (needs @bsvkey/x402-bsv-client >= 0.4.2).
-      const rc = await verifyUsageReceipt(x.usageReceipt, { messages, completion });
+      // Verify against the channel WE called (not the receipt's self-report) and,
+      // when known, the amount WE funded on-chain. Meter over the SAME messages we
+      // sent (the OpenAI shim meters the flattened messages; needs verifier >= 0.4.2).
+      const envFunded = process.env.BSVKEY_FUNDED_SATS ? Number(process.env.BSVKEY_FUNDED_SATS) : undefined;
+      const rc = await verifyUsageReceipt(x.usageReceipt, { messages, completion }, {
+        expectedChannelId: k.id,
+        fundedSats: args.fundedSats ?? envFunded,
+      });
       return {
         model: r.json.model || args.model,
         completion,

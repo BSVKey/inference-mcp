@@ -15,14 +15,32 @@ optional `@bsvkey/x402-bsv-client` + `@bsv/sdk` packages (installed with this on
 **Verifiable metering.** Each `infer` call returns a signed usage receipt, and the
 tool auto-verifies it offline (with the optional packages installed): the result
 includes `receiptVerified` and `meterVerified` (`true`, `false` + `receiptCheck`,
-or `null` if the verifier isn't installed). It recovers the broker key (pinned
-from `GET /v1/receipt-key`); checks channel binding, a monotonic sequence (no
-replay/gap), and running totals within the funded amount; **recomputes the charge**
-from the published rate (you can never be overcharged); and **recomputes the token
-count from the exact bytes** of your system/prompt and the completion, under the
-pinned `bsvkey-meter/1` tokenizer. So the channel payment is on-chain and both the
-meter and the charge are auditable, without trusting the broker's word. Spec:
-https://inference.bsvkey.com/usage-receipts.md
+or `null`). It recovers the broker key (pinned from `GET /v1/receipt-key`); binds
+the receipt to **the channel you called** (from your API key, not the receipt's
+self-report); checks a monotonic sequence (no replay/gap) and running totals within
+the funded amount; **recomputes the charge** from the published rate (you can never
+be overcharged); and **recomputes the token count from the exact bytes** of your
+messages and the completion, under the pinned `bsvkey-meter/1` tokenizer. So the
+channel payment is on-chain and both the meter and the charge are auditable,
+without trusting the broker's word.
+
+Four things an unattended client should know:
+
+- **Fails closed.** If the pinned-key endpoint is unreachable, `receiptVerified`
+  is `null` (unknown), never `true` — a down pin weakens the check to *unknown*,
+  not to *trusted*.
+- **Supply your funded amount.** Set `BSVKEY_FUNDED_SATS` (or pass `fundedSats`)
+  to the amount you funded on-chain. The receipt's own `fundedSats` is the broker's
+  assertion; when you supply yours, a receipt claiming a different amount is
+  rejected and totals are checked against what you actually paid.
+- **Persist across restarts.** Sequence continuity is in-memory by default (a
+  replay before the first receipt this process sees would be invisible). Set
+  `BSVKEY_RECEIPT_STATE` to a file path to persist per-channel `seq`/totals so
+  replays are caught across restarts.
+- **The receipt is the ledger.** The `GET /v1/channels/:id` balance endpoint can
+  lag the signed receipt by ~20s; trust the receipt, treat the endpoint as a cache.
+
+Spec: https://inference.bsvkey.com/usage-receipts.md
 
 ## Quick start
 1. **Fund a channel once** at https://inference.bsvkey.com (BRC-100 wallet, or
@@ -64,6 +82,8 @@ No npm? Grab the single-file server directly (`https://inference.bsvkey.com/mcp/
 |---|---|---|
 | `BSVKEY_BASE_URL` | `https://inference.bsvkey.com/v1` | Gateway base URL (set to a self-hosted deployment if you run your own). |
 | `BSVKEY_API_KEY` | — | `channelId:channelSecret` for a funded channel. Optional; can also be passed per call as `apiKey`. |
+| `BSVKEY_FUNDED_SATS` | — | The amount you funded your channel with on-chain. When set, receipts are verified against it instead of the broker-signed `fundedSats`. Optional; per-call `fundedSats`. |
+| `BSVKEY_RECEIPT_STATE` | — | Path to a JSON file for persisting per-channel receipt continuity (seq + totals) across restarts. Optional; in-memory only if unset. |
 
 ## Verify it's wired (no key needed)
 ```bash
