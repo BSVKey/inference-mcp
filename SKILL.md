@@ -39,8 +39,11 @@ single call in BSV via x402, using a funded key (`wif` arg or `BSVKEY_WIF`). No 
 4. **`channel_balance`** — check remaining balance, spend, and request count.
 
 ## Notes for the agent
-- Payments are REAL BSV. Treat channel funds like money: fund a small amount, top
-  up as needed.
+- Payments are REAL BSV. Treat channel funds like money: fund a small amount, and
+  top up the SAME channel when it runs low with `POST /v1/channels/<channelId>/topup`
+  (header `X-BSV-Channel-Secret`, body `{addSats}` -> 402 quote, then repeat with
+  the signed payment), or open a fresh channel. A top-up raises the channel's
+  `fundedSats`, so later receipts carry the new total.
 - `auto` routing picks the cheapest capable model; name a model explicitly
   (`claude-sonnet-5`, `grok-4.3`, …) when quality or a specific provider matters.
 - `webSearch: true` adds a small per-search fee and lets the model use live web
