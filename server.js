@@ -236,7 +236,7 @@ async function callTool(name, args = {}) {
       const completion = r.json.choices?.[0]?.message?.content ?? '';
       // Verify against the channel WE called (not the receipt's self-report) and,
       // when known, the amount WE funded on-chain. Meter over the SAME messages we
-      // sent (the OpenAI shim meters the flattened messages; needs verifier >= 0.4.2).
+      // sent (the OpenAI shim meters the flattened messages; needs verifier >= 0.7.0 for v3 hidden-token receipts).
       const envFunded = process.env.BSVKEY_FUNDED_SATS ? Number(process.env.BSVKEY_FUNDED_SATS) : undefined;
       const rc = await verifyUsageReceipt(x.usageReceipt, { messages, completion }, {
         expectedChannelId: k.id,
