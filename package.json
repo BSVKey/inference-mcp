@@ -1,6 +1,6 @@
 {
   "name": "@bsvkey/inference-mcp",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "MCP server: buy Claude & Grok inference metered per token through the hosted inference.bsvkey.com gateway. Pay with BSV (channels or per-call x402) or per call in XRP on the XRP Ledger.",
   "mcpName": "io.github.BSVKey/inference-mcp",
   "type": "module",
