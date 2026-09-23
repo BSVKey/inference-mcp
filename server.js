@@ -204,6 +204,26 @@ export const TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'xrp_infer',
+    description:
+      'Run one inference paid PER CALL in XRP on the XRP Ledger via x402. No channel needed. You provide an XRP wallet seed (xrpSeed or BSVKEY_XRP_SEED); the tool gets the 402 quote (exact drops, destination tag, signed quote; priced from the XRP Ledger\'s own XRP/RLUSD market), signs one XRP Payment for exactly that locally, and retries with X-PAYMENT. The broker checks the payment before broadcasting it, waits for validation (a few seconds), and returns the completion, the settlement tx hash, and a signed receipt. Non-custodial: the seed never leaves this process. The account keeps a 1 XRP reserve that cannot be spent. Needs the xrpl package (installed with this package). ' +
+      'On failure returns isError "error: <code> (<status>): <message>". Codes: no_xrp_seed; xrpl_missing (npm i xrpl); insufficient_xrp (the wallet cannot cover the quote above its reserve; nothing is spent); ' +
+      'payment_failed (402: the payment was refused before broadcast or did not settle; nothing is spent unless the text includes a settlement tx); invalid_request (400); ' +
+      'upstream_failed (502: the payment SETTLED but the model provider then failed; the text includes the settlement tx. No automatic refund: contact support@embryospace.com with it).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: 'The user prompt.' },
+        model: { type: 'string', description: 'Model id or policy: auto|cheapest|best, claude-*, grok-*.', default: 'claude-haiku-4-5' },
+        system: { type: 'string', description: 'Optional system prompt.' },
+        maxTokens: { type: 'integer', description: 'Max output tokens.', default: 512 },
+        xrpSeed: { type: 'string', description: 'A funded XRP wallet seed (s...). Omit to use BSVKEY_XRP_SEED. Never leaves this process.' },
+      },
+      required: ['prompt'],
+      additionalProperties: false,
+    },
+  },
 ];
 
 // Turn a broker HTTP error into "<code> (<status>): <message>[ extras]" so an agent
@@ -339,6 +359,65 @@ async function callTool(name, args = {}) {
         payTo: data.x_bsv?.payTo,
         settlementTxid: settle.transaction,
         network: settle.network,
+      };
+    }
+    case 'xrp_infer': {
+      const seed = args.xrpSeed || process.env.BSVKEY_XRP_SEED || '';
+      if (!seed) throw new Error(`no_xrp_seed: pass xrpSeed "s..." or set BSVKEY_XRP_SEED. Create a wallet at https://xrp.bsvkey.com/wallet and fund it.`);
+      let xrpl;
+      try { xrpl = await import('xrpl'); } catch { throw new Error('xrpl_missing: pay-per-call in XRP needs the xrpl package. Install it: npm i xrpl'); }
+      const wallet = xrpl.Wallet.fromSeed(seed);
+      const url = `${BASE}/x402/xrp/chat/completions`;
+      const reqBody = JSON.stringify({
+        model: args.model || 'claude-haiku-4-5',
+        messages: [
+          ...(args.system ? [{ role: 'system', content: args.system }] : []),
+          { role: 'user', content: String(args.prompt || '') },
+        ],
+        max_tokens: args.maxTokens || 512,
+      });
+      const post = (headers = {}) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: reqBody });
+      const r402 = await post();
+      const j402 = await r402.json().catch(() => ({}));
+      if (r402.status !== 402 || !j402.accepts) throw apiError(r402.status, j402, `quote failed (${r402.status})`);
+      const req = j402.accepts[0];
+      const wss = req.network === 'xrpl:1' ? 'wss://s.altnet.rippletest.net:51233' : 'wss://xrplcluster.com';
+      const client = new xrpl.Client(wss);
+      await client.connect();
+      let signed;
+      try {
+        const info = (await client.request({ command: 'account_info', account: wallet.classicAddress, ledger_index: 'validated' })).result.account_data;
+        const led = (await client.request({ command: 'server_info' })).result.info.validated_ledger;
+        const reserve = Math.round((Number(led.reserve_base_xrp) + Number(info.OwnerCount || 0) * Number(led.reserve_inc_xrp)) * 1e6);
+        const spendable = Number(info.Balance) - reserve - 20;
+        if (Number(req.maxAmountRequired) > spendable) throw new Error(`insufficient_xrp: this call costs ${Number(req.maxAmountRequired) / 1e6} XRP; ${wallet.classicAddress} can spend ${Math.max(0, spendable) / 1e6} XRP above its ${reserve / 1e6} XRP reserve. Nothing was spent.`);
+        const prepared = await client.autofill({ TransactionType: 'Payment', Account: wallet.classicAddress, Destination: req.payTo, DestinationTag: req.extra.destinationTag, Amount: req.maxAmountRequired });
+        signed = wallet.sign(prepared);
+      } catch (e) {
+        if (/^insufficient_xrp/.test(e.message)) throw e;
+        if (/actNotFound|Account not found/i.test(String(e && (e.data && e.data.error) || e.message))) throw new Error(`insufficient_xrp: ${wallet.classicAddress} is not activated. Fund it with at least 1 XRP first. Nothing was spent.`);
+        throw e;
+      } finally { try { await client.disconnect(); } catch {} }
+      const xpay = Buffer.from(JSON.stringify({ x402Version: 1, scheme: 'exact', network: req.network, payload: { txBlob: signed.tx_blob, quote: req.extra.quote } })).toString('base64');
+      let res = await post({ 'x-payment': xpay });
+      for (let i = 0; i < 3 && res.status === 202; i++) { await new Promise((z) => setTimeout(z, 3000)); res = await post({ 'x-payment': xpay }); }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (data && data.settlement && !data.x_bsv) data.x_bsv = { settlement: data.settlement };
+        if (data && data.x_xrp && data.x_xrp.settlement) data.x_bsv = { settlement: data.x_xrp.settlement };
+        throw apiError(res.status, data, `xrp inference failed (${res.status})`);
+      }
+      return {
+        model: data.model || args.model,
+        completion: data.choices?.[0]?.message?.content ?? '',
+        paidDrops: data.x_xrp?.paidDrops,
+        paidXrp: data.x_xrp ? data.x_xrp.paidDrops / 1e6 : undefined,
+        priceUsd: data.x_xrp?.priceUsd,
+        payTo: data.x_xrp?.payTo,
+        payer: data.x_xrp?.payer,
+        settlementTx: data.x_xrp?.settlement,
+        network: data.x_xrp?.network,
+        receipt: data.receipt,
       };
     }
     default:

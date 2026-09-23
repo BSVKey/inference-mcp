@@ -5,12 +5,21 @@ settled in BSV**, through the hosted gateway at **inference.bsvkey.com**. Zero
 dependencies (Node ≥ 18, uses global `fetch`). It's a thin HTTP client — it never
 holds your keys or runs models; every call is billed through the gateway.
 
-Tools: `list_models`, `infer`, `channel_balance`, `open_channel`, `x402_infer`.
+Tools: `list_models`, `infer`, `channel_balance`, `open_channel`, `x402_infer`, `xrp_infer`.
 
 Two ways to pay: a **prepaid channel** (`infer`, fund once, draw down per token) or
 **per call via x402** (`x402_infer` — no channel; the agent pays each request in BSV
 with its own key). `x402_infer` needs a funded WIF (`wif` arg or `BSVKEY_WIF`) and the
 optional `@bsvkey/x402-bsv-client` + `@bsv/sdk` packages (installed with this one).
+
+**Pay per call in XRP** with `xrp_infer`: the tool gets a quote in XRP (priced from
+the XRP Ledger's own XRP/RLUSD market), signs one XRP Payment for exactly that
+locally, and the gateway checks it before broadcasting, waits for validation (a few
+seconds), and returns the answer, the settlement tx, and a signed receipt. It needs
+a funded XRP seed (`xrpSeed` arg or `BSVKEY_XRP_SEED`; create one at
+[xrp.bsvkey.com/wallet](https://xrp.bsvkey.com/wallet)) and the optional `xrpl`
+package (installed with this one). The account keeps a 1 XRP reserve that can't be
+spent.
 
 **Verifiable metering.** Each `infer` call returns a signed usage receipt, and the
 tool auto-verifies it offline (with the optional packages installed): the result
@@ -83,6 +92,7 @@ No npm? Grab the single-file server directly (`https://inference.bsvkey.com/mcp/
 | `BSVKEY_BASE_URL` | `https://inference.bsvkey.com/v1` | Gateway base URL (set to a self-hosted deployment if you run your own). |
 | `BSVKEY_API_KEY` | — | `channelId:channelSecret` for a funded channel. Optional; can also be passed per call as `apiKey`. |
 | `BSVKEY_FUNDED_SATS` | — | The amount you funded your channel with on-chain. When set, receipts are verified against it instead of the broker-signed `fundedSats`. Optional; per-call `fundedSats`. |
+| `BSVKEY_XRP_SEED` | none | An XRP wallet seed for `xrp_infer`. Optional; can also be passed per call as `xrpSeed`. Never leaves this process. |
 | `BSVKEY_RECEIPT_STATE` | — | Path to a JSON file for persisting per-channel receipt continuity (seq + totals) across restarts. Optional; in-memory only if unset. |
 
 ## Errors
@@ -105,6 +115,11 @@ error: <code> (<http status>): <message> [extra=value, ...]
 | `verifier_missing` | | `x402_infer` | `@bsvkey/x402-bsv-client` / `@bsv/sdk` not installed | `npm i @bsvkey/x402-bsv-client @bsv/sdk` |
 | `payment_failed` | 402 | `x402_infer` | The payment didn't settle (e.g. the key's address is unfunded); extras give the `reason` | Fund the address; nothing was spent |
 | `upstream_failed` | 502 | `x402_infer` | The payment **settled** but the provider then failed; extras give `settlementTxid` | No automatic refund: email support@embryospace.com with the txid |
+| `no_xrp_seed` | | `xrp_infer` | No `xrpSeed` and no `BSVKEY_XRP_SEED` | Pass a funded XRP seed |
+| `xrpl_missing` | | `xrp_infer` | The `xrpl` package isn't installed | `npm i xrpl` |
+| `insufficient_xrp` | | `xrp_infer` | The wallet isn't activated, or can't cover the quote above its 1 XRP reserve | Fund it; nothing was spent |
+| `payment_failed` | 402 | `xrp_infer` | The payment was refused before broadcast, or didn't settle; extras give the `reason` | Nothing was spent unless a settlement tx is included |
+| `upstream_failed` | 502 | `xrp_infer` | The payment **settled** but the provider then failed; extras give the settlement tx | No automatic refund: email support@embryospace.com with the tx |
 
 On a prepaid channel nothing is charged on any error. A successful `infer` can
 still report `receiptVerified: false` (the signed receipt didn't check out; see
