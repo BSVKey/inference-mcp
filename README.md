@@ -85,6 +85,36 @@ No npm? Grab the single-file server directly (`https://inference.bsvkey.com/mcp/
 | `BSVKEY_FUNDED_SATS` | — | The amount you funded your channel with on-chain. When set, receipts are verified against it instead of the broker-signed `fundedSats`. Optional; per-call `fundedSats`. |
 | `BSVKEY_RECEIPT_STATE` | — | Path to a JSON file for persisting per-channel receipt continuity (seq + totals) across restarts. Optional; in-memory only if unset. |
 
+## Errors
+
+A failed tool call returns `isError: true` with text in one fixed shape, so an
+agent can branch on the code without parsing prose:
+
+```
+error: <code> (<http status>): <message> [extra=value, ...]
+```
+
+| Code | Status | Tool | What it means | What to do |
+|---|---|---|---|---|
+| `no_channel_key` | | `infer`, `channel_balance` | No `apiKey` and no `BSVKEY_API_KEY` | Open a channel at the site (see `open_channel`) |
+| `invalid_channel` | 401 / 404 | `infer`, `channel_balance` | Channel not found, wrong secret, or closed | Open a new channel |
+| `insufficient_balance` | 402 | `infer` | The channel can't cover the worst case for this call; extras give `requiredSats` and `balanceSats` | Top up at the site, or lower `maxTokens` / turn off `webSearch` |
+| `invalid_request` | 400 | `infer`, `x402_infer` | Unknown model or policy, a model whose provider isn't enabled, or bad input | Call `list_models` |
+| `upstream_failed` | 502 | `infer` | The model provider failed | Nothing is charged; retry or pick another model |
+| `no_wif` | | `x402_infer` | No `wif` and no `BSVKEY_WIF` | Pass a funded key |
+| `verifier_missing` | | `x402_infer` | `@bsvkey/x402-bsv-client` / `@bsv/sdk` not installed | `npm i @bsvkey/x402-bsv-client @bsv/sdk` |
+| `payment_failed` | 402 | `x402_infer` | The payment didn't settle (e.g. the key's address is unfunded); extras give the `reason` | Fund the address; nothing was spent |
+| `upstream_failed` | 502 | `x402_infer` | The payment **settled** but the provider then failed; extras give `settlementTxid` | No automatic refund: email support@embryospace.com with the txid |
+
+On a prepaid channel nothing is charged on any error. A successful `infer` can
+still report `receiptVerified: false` (the signed receipt didn't check out; see
+`receiptCheck`) or `null` (couldn't check: verifier missing, or the receipt-key
+endpoint was down).
+
+Thinking models (`claude-sonnet-5`, `claude-opus-5`, `claude-opus-5-5`,
+`claude-fable-5-1`) bill their hidden reasoning as output, and `maxTokens` is
+raised to at least 1024 for them.
+
 ## Verify it's wired (no key needed)
 ```bash
 printf '%s\n' \

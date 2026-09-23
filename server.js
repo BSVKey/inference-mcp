@@ -145,7 +145,14 @@ export const TOOLS = [
   {
     name: 'infer',
     description:
-      'Run one metered inference (OpenAI-compatible), paid per token in BSV from your prepaid channel. Returns the completion plus a receipt: satoshis charged, model routed to, and remaining balance. Requires a funded channel key (apiKey or BSVKEY_API_KEY).',
+      'Run one metered inference (OpenAI-compatible), paid per token in BSV from your prepaid channel. Returns the completion plus a receipt: satoshis charged, model routed to, and remaining balance. Requires a funded channel key (apiKey or BSVKEY_API_KEY). ' +
+      'Thinking models (claude-sonnet-5, claude-opus-5, claude-opus-5-5, claude-fable-5-1) bill their hidden reasoning as output, and maxTokens is raised to at least 1024 for them. ' +
+      'On failure the tool returns isError with text "error: <code> (<http status>): <message>". Codes: no_channel_key (no apiKey and no BSVKEY_API_KEY); ' +
+      'invalid_channel (401: channel not found, bad secret, or closed; open a new one); ' +
+      'insufficient_balance (402: the channel cannot cover the worst case for this call; the text includes requiredSats and balanceSats; top up at the website, or lower maxTokens / turn off webSearch); ' +
+      'invalid_request (400: unknown model or policy, a model whose provider is not enabled, or a malformed prompt; call list_models); ' +
+      'upstream_failed (502: the model provider failed; nothing is charged, retry or pick another model). ' +
+      'Nothing is charged on any error. A successful call can still report receiptVerified:false (the signed receipt did not check out; see receiptCheck) or null (could not check: verifier not installed or the receipt key endpoint was down).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -163,7 +170,7 @@ export const TOOLS = [
   },
   {
     name: 'channel_balance',
-    description: 'Check a prepaid channel’s remaining BSV balance, spend, and request count.',
+    description: 'Check a prepaid channel’s remaining BSV balance, spend, and request count. On failure returns isError "error: <code> (<status>): <message>": no_channel_key, or invalid_channel (401/404: not found, bad secret, or closed).',
     inputSchema: {
       type: 'object',
       properties: { apiKey: { type: 'string', description: 'channelId:channelSecret. Omit to use BSVKEY_API_KEY.' } },
@@ -179,7 +186,10 @@ export const TOOLS = [
   {
     name: 'x402_infer',
     description:
-      'Run one inference paid PER CALL in BSV via x402 — no prepaid channel needed. You provide a funded BSV private key (wif or BSVKEY_WIF); the tool fetches the 402 quote, builds + signs a BSV payment, retries with X-PAYMENT, and returns the completion plus the on-chain settlement txid. Non-custodial: signing happens locally in this process, the key never leaves it. Needs @bsvkey/x402-bsv-client + @bsv/sdk (installed with this package).',
+      'Run one inference paid PER CALL in BSV via x402 — no prepaid channel needed. You provide a funded BSV private key (wif or BSVKEY_WIF); the tool fetches the 402 quote, builds + signs a BSV payment, retries with X-PAYMENT, and returns the completion plus the on-chain settlement txid. Non-custodial: signing happens locally in this process, the key never leaves it. Needs @bsvkey/x402-bsv-client + @bsv/sdk (installed with this package). ' +
+      'On failure returns isError "error: <code> (<status>): <message>". Codes: no_wif (no key given); verifier_missing (the two packages are not installed); ' +
+      'payment_failed (402: the payment did not settle, e.g. the key address is unfunded or too low; nothing is spent); invalid_request (400: unknown model or bad input; nothing is spent); ' +
+      'upstream_failed (502: the payment SETTLED but the model provider then failed; the text includes the settlement txid. There is no automatic refund: contact support@embryospace.com with that txid).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -195,6 +205,26 @@ export const TOOLS = [
     },
   },
 ];
+
+// Turn a broker HTTP error into "<code> (<status>): <message>[ extras]" so an agent
+// can branch on the code without parsing prose. Codes match the tool descriptions.
+function apiError(status, body, fallback) {
+  const e = (body && body.error) || {};
+  const msg = (typeof e === 'string' ? e : e.message) || body?.reason || fallback;
+  const code = (status === 401 || status === 404) ? 'invalid_channel'
+    : status === 402 ? (body?.x402Version ? 'payment_failed' : 'insufficient_balance')
+    : status === 400 ? 'invalid_request'
+    : status === 502 ? 'upstream_failed'
+    : 'error';
+  const extras = [];
+  const src = typeof e === 'object' ? { ...body, ...e } : body || {};
+  if (src.requiredSats !== undefined) extras.push(`requiredSats=${src.requiredSats}`);
+  if (src.balanceSats !== undefined) extras.push(`balanceSats=${src.balanceSats}`);
+  if (body?.reason && body.reason !== msg) extras.push(`reason=${body.reason}`);
+  const settlement = body?.x_bsv?.settlement;
+  if (settlement) extras.push(`settlementTxid=${typeof settlement === 'string' ? settlement : JSON.stringify(settlement)} (payment settled; contact support@embryospace.com)`);
+  return new Error(`${code} (${status}): ${typeof msg === 'string' ? msg : JSON.stringify(msg)}${extras.length ? ' [' + extras.join(', ') + ']' : ''}`);
+}
 
 async function callTool(name, args = {}) {
   switch (name) {
@@ -214,7 +244,7 @@ async function callTool(name, args = {}) {
     }
     case 'infer': {
       const k = keyParts(args.apiKey);
-      if (!k) throw new Error('No channel key. Pass apiKey "channelId:channelSecret" or set BSVKEY_API_KEY. Open one via the open_channel tool.');
+      if (!k) throw new Error('no_channel_key: pass apiKey "channelId:channelSecret" or set BSVKEY_API_KEY. Open one via the open_channel tool.');
       const messages = [
         ...(args.system ? [{ role: 'system', content: args.system }] : []),
         { role: 'user', content: String(args.prompt || '') },
@@ -228,10 +258,7 @@ async function callTool(name, args = {}) {
           web_search: args.webSearch === true,
         },
       });
-      if (!r.ok) {
-        const msg = r.json?.error?.message || r.json?.error || `inference failed (${r.status})`;
-        throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
-      }
+      if (!r.ok) throw apiError(r.status, r.json, `inference failed (${r.status})`);
       const x = r.json.x_bsv || {};
       const completion = r.json.choices?.[0]?.message?.content ?? '';
       // Verify against the channel WE called (not the receipt's self-report) and,
@@ -261,12 +288,9 @@ async function callTool(name, args = {}) {
     }
     case 'channel_balance': {
       const k = keyParts(args.apiKey);
-      if (!k) throw new Error('No channel key. Pass apiKey "channelId:channelSecret" or set BSVKEY_API_KEY.');
+      if (!k) throw new Error('no_channel_key: pass apiKey "channelId:channelSecret" or set BSVKEY_API_KEY.');
       const r = await http('GET', `/channels/${encodeURIComponent(k.id)}`, { headers: { 'x-bsv-channel-secret': k.secret } });
-      if (!r.ok) {
-        const msg = r.json?.error?.message || r.json?.error || `balance check failed (${r.status})`;
-        throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
-      }
+      if (!r.ok) throw apiError(r.status, r.json, `balance check failed (${r.status})`);
       return r.json;
     }
     case 'open_channel': {
@@ -283,12 +307,12 @@ async function callTool(name, args = {}) {
     }
     case 'x402_infer': {
       const wif = args.wif || process.env.BSVKEY_WIF || '';
-      if (!wif) throw new Error(`No BSV key. Pass wif "<WIF>" or set BSVKEY_WIF — an agent-funded key to pay per call. Fund its address at ${SITE}.`);
+      if (!wif) throw new Error(`no_wif: no BSV key. Pass wif "<WIF>" or set BSVKEY_WIF — an agent-funded key to pay per call. Fund its address at ${SITE}.`);
       let x402;
       try {
         x402 = await import('@bsvkey/x402-bsv-client');
       } catch {
-        throw new Error('Pay-per-call needs @bsvkey/x402-bsv-client and @bsv/sdk. Install them: npm i @bsvkey/x402-bsv-client @bsv/sdk');
+        throw new Error('verifier_missing: pay-per-call needs @bsvkey/x402-bsv-client and @bsv/sdk. Install them: npm i @bsvkey/x402-bsv-client @bsv/sdk');
       }
       const url = `${BASE}/x402/chat/completions`;
       const init = {
@@ -306,10 +330,7 @@ async function callTool(name, args = {}) {
       };
       const res = await x402.fetchWithX402(url, init, { wif });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const msg = data?.error?.message || data?.error || data?.reason || `x402 inference failed (${res.status})`;
-        throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
-      }
+      if (!res.ok) throw apiError(res.status, data, `x402 inference failed (${res.status})`);
       const settle = x402.readSettlement(res) || {};
       return {
         model: data.model || args.model,
