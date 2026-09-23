@@ -18,8 +18,8 @@ locally, and the gateway checks it before broadcasting, waits for validation (a 
 seconds), and returns the answer, the settlement tx, and a signed receipt. It needs
 a funded XRP seed (`xrpSeed` arg or `BSVKEY_XRP_SEED`; create one at
 [xrp.bsvkey.com/wallet](https://xrp.bsvkey.com/wallet)) and the optional `xrpl`
-package (installed with this one). The account keeps a 1 XRP reserve that can't be
-spent.
+package (installed with this one; it needs Node 20.19+ or 22.12+). The account
+keeps a 1 XRP reserve that can't be spent.
 
 **Verifiable metering.** Each `infer` call returns a signed usage receipt, and the
 tool auto-verifies it offline (with the optional packages installed): the result
@@ -117,6 +117,7 @@ error: <code> (<http status>): <message> [extra=value, ...]
 | `upstream_failed` | 502 | `x402_infer` | The payment **settled** but the provider then failed; extras give `settlementTxid` | No automatic refund: email support@embryospace.com with the txid |
 | `no_xrp_seed` | | `xrp_infer` | No `xrpSeed` and no `BSVKEY_XRP_SEED` | Pass a funded XRP seed |
 | `xrpl_missing` | | `xrp_infer` | The `xrpl` package isn't installed | `npm i xrpl` |
+| `node_too_old` | | `xrp_infer` | Node is older than 20.19 / 22.12, which the `xrpl` package needs | Upgrade Node (the other tools run on Node 18+) |
 | `insufficient_xrp` | | `xrp_infer` | The wallet isn't activated, or can't cover the quote above its 1 XRP reserve | Fund it; nothing was spent |
 | `payment_failed` | 402 | `xrp_infer` | The payment was refused before broadcast, or didn't settle; extras give the `reason` | Nothing was spent unless a settlement tx is included |
 | `upstream_failed` | 502 | `xrp_infer` | The payment **settled** but the provider then failed; extras give the settlement tx | No automatic refund: email support@embryospace.com with the tx |

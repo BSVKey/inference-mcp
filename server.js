@@ -208,7 +208,7 @@ export const TOOLS = [
     name: 'xrp_infer',
     description:
       'Run one inference paid PER CALL in XRP on the XRP Ledger via x402. No channel needed. You provide an XRP wallet seed (xrpSeed or BSVKEY_XRP_SEED); the tool gets the 402 quote (exact drops, destination tag, signed quote; priced from the XRP Ledger\'s own XRP/RLUSD market), signs one XRP Payment for exactly that locally, and retries with X-PAYMENT. The broker checks the payment before broadcasting it, waits for validation (a few seconds), and returns the completion, the settlement tx hash, and a signed receipt. Non-custodial: the seed never leaves this process. The account keeps a 1 XRP reserve that cannot be spent. Needs the xrpl package (installed with this package). ' +
-      'On failure returns isError "error: <code> (<status>): <message>". Codes: no_xrp_seed; xrpl_missing (npm i xrpl); insufficient_xrp (the wallet cannot cover the quote above its reserve; nothing is spent); ' +
+      'On failure returns isError "error: <code> (<status>): <message>". Codes: no_xrp_seed; xrpl_missing (npm i xrpl); node_too_old (xrp_infer needs Node 20.19+ or 22.12+); insufficient_xrp (the wallet cannot cover the quote above its reserve; nothing is spent); ' +
       'payment_failed (402: the payment was refused before broadcast or did not settle; nothing is spent unless the text includes a settlement tx); invalid_request (400); ' +
       'upstream_failed (502: the payment SETTLED but the model provider then failed; the text includes the settlement tx. No automatic refund: contact support@embryospace.com with it).',
     inputSchema: {
@@ -365,7 +365,15 @@ async function callTool(name, args = {}) {
       const seed = args.xrpSeed || process.env.BSVKEY_XRP_SEED || '';
       if (!seed) throw new Error(`no_xrp_seed: pass xrpSeed "s..." or set BSVKEY_XRP_SEED. Create a wallet at https://xrp.bsvkey.com/wallet and fund it.`);
       let xrpl;
-      try { xrpl = await import('xrpl'); } catch { throw new Error('xrpl_missing: pay-per-call in XRP needs the xrpl package. Install it: npm i xrpl'); }
+      try { xrpl = await import('xrpl'); } catch (e) {
+        const msg = String((e && e.message) || e);
+        // xrpl's crypto dependencies are ES modules loaded from CommonJS, which
+        // needs Node 20.19+ or 22.12+. Say so plainly instead of "not installed".
+        if (/ERR_REQUIRE_ESM|require\(\) of ES Module/i.test(msg) || e && e.code === 'ERR_REQUIRE_ESM') {
+          throw new Error(`node_too_old: xrp_infer needs Node 20.19+ or 22.12+ (this is ${process.version}). Upgrade Node; the other tools work on Node 18+.`);
+        }
+        throw new Error('xrpl_missing: pay-per-call in XRP needs the xrpl package. Install it: npm i xrpl');
+      }
       const wallet = xrpl.Wallet.fromSeed(seed);
       const url = `${BASE}/x402/xrp/chat/completions`;
       const reqBody = JSON.stringify({
