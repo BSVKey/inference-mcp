@@ -399,6 +399,7 @@ async function callTool(name, args = {}) {
         const reserve = Math.round((Number(led.reserve_base_xrp) + Number(info.OwnerCount || 0) * Number(led.reserve_inc_xrp)) * 1e6);
         const spendable = Number(info.Balance) - reserve - 20;
         if (Number(req.maxAmountRequired) > spendable) throw new Error(`insufficient_xrp: this call costs ${Number(req.maxAmountRequired) / 1e6} XRP; ${wallet.classicAddress} can spend ${Math.max(0, spendable) / 1e6} XRP above its ${reserve / 1e6} XRP reserve. Nothing was spent.`);
+        if (wallet.classicAddress === req.payTo) throw new Error('payment_failed: this wallet is the one that receives payments, so it cannot pay itself. Use a different wallet. Nothing was spent.');
         const prepared = await client.autofill({ TransactionType: 'Payment', Account: wallet.classicAddress, Destination: req.payTo, DestinationTag: req.extra.destinationTag, Amount: req.maxAmountRequired });
         signed = wallet.sign(prepared);
       } catch (e) {
@@ -411,7 +412,8 @@ async function callTool(name, args = {}) {
       for (let i = 0; i < 3 && res.status === 202; i++) { await new Promise((z) => setTimeout(z, 3000)); res = await post({ 'x-payment': xpay }); }
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        if (data && data.settlement && !data.x_bsv) data.x_bsv = { settlement: data.settlement };
+        // Only a payment that really settled is reported as one (x_xrp.settlement);
+        // a refused or unvalidated payment's tx spent nothing.
         if (data && data.x_xrp && data.x_xrp.settlement) data.x_bsv = { settlement: data.x_xrp.settlement };
         throw apiError(res.status, data, `xrp inference failed (${res.status})`);
       }
