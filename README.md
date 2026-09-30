@@ -114,13 +114,13 @@ error: <code> (<http status>): <message> [extra=value, ...]
 | `no_wif` | | `x402_infer` | No `wif` and no `BSVKEY_WIF` | Pass a funded key |
 | `verifier_missing` | | `x402_infer` | `@bsvkey/x402-bsv-client` / `@bsv/sdk` not installed | `npm i @bsvkey/x402-bsv-client @bsv/sdk` |
 | `payment_failed` | 402 | `x402_infer` | The payment didn't settle (e.g. the key's address is unfunded); extras give the `reason` | Fund the address; nothing was spent |
-| `upstream_failed` | 502 | `x402_infer` | The payment **settled** but the provider then failed; extras give `settlementTxid` | No automatic refund: email support@embryospace.com with the txid |
+| `upstream_failed` | 502 | `x402_infer` | The payment **settled** but the provider then failed; extras give `settlementTxid` | No automatic refund: email embryospace@gmail.com with the txid |
 | `no_xrp_seed` | | `xrp_infer` | No `xrpSeed` and no `BSVKEY_XRP_SEED` | Pass a funded XRP seed |
 | `xrpl_missing` | | `xrp_infer` | The `xrpl` package isn't installed | `npm i xrpl` |
 | `node_too_old` | | `xrp_infer` | Node is older than 20.19 / 22.12, which the `xrpl` package needs | Upgrade Node (the other tools run on Node 18+) |
 | `insufficient_xrp` | | `xrp_infer` | The wallet isn't activated, or can't cover the quote above its 1 XRP reserve | Fund it; nothing was spent |
 | `payment_failed` | 402 | `xrp_infer` | The payment was refused before broadcast, or didn't settle; extras give the `reason` | Nothing was spent unless a settlement tx is included |
-| `upstream_failed` | 502 | `xrp_infer` | The payment **settled** but the provider then failed; extras give the settlement tx | No automatic refund: email support@embryospace.com with the tx |
+| `upstream_failed` | 502 | `xrp_infer` | The payment **settled** but the provider then failed; extras give the settlement tx | No automatic refund: email embryospace@gmail.com with the tx |
 
 On a prepaid channel nothing is charged on any error. A successful `infer` can
 still report `receiptVerified: false` (the signed receipt didn't check out; see

@@ -189,7 +189,7 @@ export const TOOLS = [
       'Run one inference paid PER CALL in BSV via x402 — no prepaid channel needed. You provide a funded BSV private key (wif or BSVKEY_WIF); the tool fetches the 402 quote, builds + signs a BSV payment, retries with X-PAYMENT, and returns the completion plus the on-chain settlement txid. Non-custodial: signing happens locally in this process, the key never leaves it. Needs @bsvkey/x402-bsv-client + @bsv/sdk (installed with this package). ' +
       'On failure returns isError "error: <code> (<status>): <message>". Codes: no_wif (no key given); verifier_missing (the two packages are not installed); ' +
       'payment_failed (402: the payment did not settle, e.g. the key address is unfunded or too low; nothing is spent); invalid_request (400: unknown model or bad input; nothing is spent); ' +
-      'upstream_failed (502: the payment SETTLED but the model provider then failed; the text includes the settlement txid. There is no automatic refund: contact support@embryospace.com with that txid).',
+      'upstream_failed (502: the payment SETTLED but the model provider then failed; the text includes the settlement txid. There is no automatic refund: contact embryospace@gmail.com with that txid).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -210,7 +210,7 @@ export const TOOLS = [
       'Run one inference paid PER CALL in XRP on the XRP Ledger via x402. No channel needed. You provide an XRP wallet seed (xrpSeed or BSVKEY_XRP_SEED); the tool gets the 402 quote (exact drops, destination tag, signed quote; priced from the XRP Ledger\'s own XRP/RLUSD market), signs one XRP Payment for exactly that locally, and retries with X-PAYMENT. The broker checks the payment before broadcasting it, waits for validation (a few seconds), and returns the completion, the settlement tx hash, and a signed receipt. Non-custodial: the seed never leaves this process. The account keeps a 1 XRP reserve that cannot be spent. Needs the xrpl package (installed with this package). ' +
       'On failure returns isError "error: <code> (<status>): <message>". Codes: no_xrp_seed; xrpl_missing (npm i xrpl); node_too_old (xrp_infer needs Node 20.19+ or 22.12+); insufficient_xrp (the wallet cannot cover the quote above its reserve; nothing is spent); ' +
       'payment_failed (402: the payment was refused before broadcast or did not settle; nothing is spent unless the text includes a settlement tx); invalid_request (400); ' +
-      'upstream_failed (502: the payment SETTLED but the model provider then failed; the text includes the settlement tx. No automatic refund: contact support@embryospace.com with it).',
+      'upstream_failed (502: the payment SETTLED but the model provider then failed; the text includes the settlement tx. No automatic refund: contact embryospace@gmail.com with it).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -242,7 +242,7 @@ function apiError(status, body, fallback) {
   if (src.balanceSats !== undefined) extras.push(`balanceSats=${src.balanceSats}`);
   if (body?.reason && body.reason !== msg) extras.push(`reason=${body.reason}`);
   const settlement = body?.x_bsv?.settlement;
-  if (settlement) extras.push(`settlementTxid=${typeof settlement === 'string' ? settlement : JSON.stringify(settlement)} (payment settled; contact support@embryospace.com)`);
+  if (settlement) extras.push(`settlementTxid=${typeof settlement === 'string' ? settlement : JSON.stringify(settlement)} (payment settled; contact embryospace@gmail.com)`);
   return new Error(`${code} (${status}): ${typeof msg === 'string' ? msg : JSON.stringify(msg)}${extras.length ? ' [' + extras.join(', ') + ']' : ''}`);
 }
 
