@@ -18,12 +18,20 @@
 //
 // Run:  node server.js      (Node >= 18 for global fetch)
 
+import { readFileSync } from 'node:fs';
+
 const BASE = (process.env.BSVKEY_BASE_URL || 'https://inference.bsvkey.com/v1').replace(/\/+$/, '');
 const SITE = BASE.replace(/\/v1$/, '');
 const ENV_KEY = process.env.BSVKEY_API_KEY || '';
 
 const PROTOCOL_VERSION = '2024-11-05';
-const SERVER_INFO = { name: 'bsvkey-inference', version: '1.0.0' };
+// Report the published package version (package.json ships in every npm tarball).
+function pkgVersion() {
+  try {
+    return JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version || '0.0.0';
+  } catch { return '0.0.0'; }
+}
+const SERVER_INFO = { name: 'bsvkey-inference', version: pkgVersion() };
 
 // Resolve a channel API key ("channelId:channelSecret") from arg or env.
 function keyParts(apiKey) {
