@@ -7,6 +7,9 @@
   "bin": {
     "bsvkey-inference-mcp": "server.js"
   },
+  "scripts": {
+    "test": "node --test"
+  },
   "main": "server.js",
   "engines": {
     "node": ">=18"
