@@ -50,3 +50,13 @@ test('server.json versions match package.json', () => {
   assert.equal(npm.identifier, pkg.name);
   assert.equal(npm.version, pkg.version);
 });
+
+test('server.json lists the hosted remote and keeps the description within the registry limit', () => {
+  assert.ok(serverJson.description.length <= 100, 'registry caps description at 100 characters');
+  const remote = (serverJson.remotes || []).find((r) => r.type === 'streamable-http');
+  assert.ok(remote, 'a streamable-http remote is listed');
+  assert.equal(remote.url, 'https://inference.bsvkey.com/mcp');
+  const auth = remote.headers.find((h) => h.name === 'Authorization');
+  assert.equal(auth.isSecret, true);
+  assert.equal(auth.isRequired, false);
+});

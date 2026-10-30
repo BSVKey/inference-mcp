@@ -86,6 +86,40 @@ claude mcp add bsvkey-inference \
 ```
 No npm? Grab the single-file server directly (`https://inference.bsvkey.com/mcp/server.js`) and use `"command": "node", "args": ["server.js"]`.
 
+### Hosted (no install)
+
+Any MCP host that supports remote servers can connect to
+**`https://inference.bsvkey.com/mcp`** (Streamable HTTP). Same six tools, nothing
+to install.
+
+```bash
+claude mcp add --transport http bsvkey-inference https://inference.bsvkey.com/mcp \
+  --header "Authorization: Bearer channelId:channelSecret"
+```
+
+```json
+{
+  "mcpServers": {
+    "bsvkey-inference": {
+      "type": "http",
+      "url": "https://inference.bsvkey.com/mcp",
+      "headers": { "Authorization": "Bearer channelId:channelSecret" }
+    }
+  }
+}
+```
+
+- `list_models` and `open_channel` need no header.
+- `infer` and `channel_balance` use the prepaid channel key in the
+  `Authorization` header (or `apiKey` per call).
+- The hosted server **never takes a private key**. `x402_infer` (Bitcoin BSV) and
+  `xrp_infer` (XRP) are two steps there: call without `payment` to get the quote,
+  sign it in your own wallet, then call again with `payment` (the base64
+  `X-PAYMENT` value). A `wif` or `xrpSeed` argument is refused.
+- The hosted server returns the signed usage receipt but does not verify it
+  for you; verify it offline with `@bsvkey/x402-bsv-client`. To sign payments
+  and verify receipts locally from a key, use the npm package above.
+
 ## Configuration (env)
 | Var | Default | Meaning |
 |---|---|---|
